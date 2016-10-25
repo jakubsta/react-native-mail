@@ -9,10 +9,11 @@ import com.facebook.react.bridge.ReactApplicationContext;
 import com.facebook.react.bridge.ReactContextBaseJavaModule;
 import com.facebook.react.bridge.ReactMethod;
 import com.facebook.react.bridge.ReadableMap;
+import com.facebook.react.bridge.ReadableType;
 import com.facebook.react.bridge.ReadableArray;
 import com.facebook.react.bridge.Callback;
 
-import java.util.List;
+import java.util.*;
 import java.io.File;
 
 /**
@@ -33,12 +34,11 @@ public class RNMailModule extends ReactContextBaseJavaModule {
   }
 
   /**
-    * Converts a ReadableArray to a String array
-    *
-    * @param r the ReadableArray instance to convert
-    *
-    * @return array of strings
-  */
+   * Converts a ReadableArray to a String array
+   *
+   * @param r the ReadableArray instance to convert
+   * @return array of strings
+   */
   private String[] readableArrayToStringArray(ReadableArray r) {
     int length = r.size();
     String[] strArray = new String[length];
@@ -50,46 +50,72 @@ public class RNMailModule extends ReactContextBaseJavaModule {
     return strArray;
   }
 
+  private Uri readableMapToUri(ReadableMap attachment) {
+    File file = new File(attachment.getString("path"));
+    return Uri.fromFile(file);
+  }
+
+  private ArrayList<Uri> readableArrayToUriList(ReadableArray attachments) {
+    ArrayList<Uri> uris = new ArrayList<Uri>();
+    int n = attachments.size();
+
+    for (int index = 0; index < n; index++) {
+      ReadableMap attachment = attachments.getMap(index);
+      if (attachment.hasKey("path") && !attachment.isNull("path")) {
+        uris.add(readableMapToUri(attachment));
+      }
+    }
+
+    return uris;
+  }
+
+
   @ReactMethod
   public void mail(ReadableMap options, Callback callback) {
-    Intent i = new Intent(Intent.ACTION_SENDTO);
-    i.setData(Uri.parse("mailto:"));
+    Intent mailIntent = new Intent(Intent.ACTION_SEND_MULTIPLE);
+
+    mailIntent.setData(Uri.parse("mailto:"));
+    mailIntent.setType("text/plain");
 
     if (options.hasKey("subject") && !options.isNull("subject")) {
-      i.putExtra(Intent.EXTRA_SUBJECT, options.getString("subject"));
+      mailIntent.putExtra(Intent.EXTRA_SUBJECT, options.getString("subject"));
     }
 
     if (options.hasKey("body") && !options.isNull("body")) {
-      i.putExtra(Intent.EXTRA_TEXT, options.getString("body"));
+      mailIntent.putExtra(Intent.EXTRA_TEXT, options.getString("body"));
     }
 
     if (options.hasKey("recipients") && !options.isNull("recipients")) {
       ReadableArray recipients = options.getArray("recipients");
-      i.putExtra(Intent.EXTRA_EMAIL, readableArrayToStringArray(recipients));
+      mailIntent.putExtra(Intent.EXTRA_EMAIL, readableArrayToStringArray(recipients));
     }
 
     if (options.hasKey("ccRecipients") && !options.isNull("ccRecipients")) {
       ReadableArray ccRecipients = options.getArray("ccRecipients");
-      i.putExtra(Intent.EXTRA_CC, readableArrayToStringArray(ccRecipients));
+      mailIntent.putExtra(Intent.EXTRA_CC, readableArrayToStringArray(ccRecipients));
     }
 
     if (options.hasKey("bccRecipients") && !options.isNull("bccRecipients")) {
       ReadableArray bccRecipients = options.getArray("bccRecipients");
-      i.putExtra(Intent.EXTRA_BCC, readableArrayToStringArray(bccRecipients));
+      mailIntent.putExtra(Intent.EXTRA_BCC, readableArrayToStringArray(bccRecipients));
     }
 
     if (options.hasKey("attachment") && !options.isNull("attachment")) {
-      ReadableMap attachment = options.getMap("attachment");
-      if (attachment.hasKey("path") && !attachment.isNull("path")) {
-        String path = attachment.getString("path");
-        File file = new File(path);
-        Uri p = Uri.fromFile(file);
-        i.putExtra(Intent.EXTRA_STREAM, p);
+      if (options.getType("attachment") == ReadableType.Array) {
+        ReadableArray attachments = options.getArray("attachment");
+
+        mailIntent.putParcelableArrayListExtra(Intent.EXTRA_STREAM, readableArrayToUriList(attachments));
+      } else {
+        ReadableMap attachment = options.getMap("attachment");
+        if (attachment.hasKey("path") && !attachment.isNull("path")) {
+          mailIntent.putParcelableArrayListExtra(Intent.EXTRA_STREAM,
+            new ArrayList<>(Arrays.asList(readableMapToUri(attachment))));
+        }
       }
     }
 
     PackageManager manager = reactContext.getPackageManager();
-    List<ResolveInfo> list = manager.queryIntentActivities(i, 0);
+    List<ResolveInfo> list = manager.queryIntentActivities(mailIntent, 0);
 
     if (list == null || list.size() == 0) {
       callback.invoke("not_available");
@@ -97,14 +123,14 @@ public class RNMailModule extends ReactContextBaseJavaModule {
     }
 
     if (list.size() == 1) {
-      i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+      mailIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
       try {
-        reactContext.startActivity(i);
+        reactContext.startActivity(mailIntent);
       } catch (Exception ex) {
         callback.invoke("error");
       }
     } else {
-      Intent chooser = Intent.createChooser(i, "Send Mail");
+      Intent chooser = Intent.createChooser(mailIntent, "Send Mail");
       chooser.setFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
 
       try {
