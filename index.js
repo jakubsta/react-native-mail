@@ -1,5 +1,4 @@
 /* @flow */
 
-const Mailer = require('NativeModules').RNMail;
+const Mailer = require('react-native').NativeModules.RNMail;
 export default Mailer;
-
